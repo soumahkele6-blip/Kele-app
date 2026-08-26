@@ -3,11 +3,12 @@ import re
 import streamlit as st
 from groq import Groq
 from gtts import gTTS
+from langdetect import detect
 
 # Configuration de la page Streamlit
 st.set_page_config(page_title="Kele le Sage", page_icon="✨", layout="centered")
 
-# Clé API et initialisation du client
+# Clé API et initialisation
 os.environ["GROQ_API_KEY"] = "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"
 client = Groq()
 
@@ -21,17 +22,25 @@ MON_ARSENAL = [
 ]
 
 def purifier_texte_pour_voix(texte):
+    """ Nettoie le texte pour éviter que la synthèse vocale ne lise les caractères Markdown """
     texte = re.sub(r'\d{2}:\d{2}', '', texte)
-    texte = re.sub(r'[\*\#\_\>\-\`]', '', texte)
+    texte = re.sub(r'[\*\#\_\>\-\`\$]', '', texte)
     return re.sub(r'\s+', ' ', texte).strip()
 
 def generer_audio(texte):
+    """ Détecte automatiquement la langue et génère une voix fluide avec le bon accent """
     texte_propre = purifier_texte_pour_voix(texte[:600])
-    est_arabe = any('\u0600' <= c <= '\u06FF' for c in texte_propre)
-    langue = 'ar' if est_arabe else 'fr'
-    
+    if not texte_propre:
+        return None
+
+    # Détection automatique de la langue (Arabe, Français, Anglais, Espagnol, etc.)
     try:
-        tts = gTTS(text=texte_propre, lang=langue)
+        langue_detectee = detect(texte_propre)
+    except Exception:
+        langue_detectee = 'fr'
+
+    try:
+        tts = gTTS(text=texte_propre, lang=langue_detectee)
         audio_file = "sage_pur.mp3"
         tts.save(audio_file)
         return audio_file
@@ -41,30 +50,35 @@ def generer_audio(texte):
 
 # Interface Streamlit
 st.title("✨ Kele le Sage")
-st.write(" Posez votre question, l'IA vous répondra par texte et par la voix.")
+st.write("Posez votre question, l'IA vous répondra avec précision textuelle et vocale.")
 
-# Historique de chat dans la session
+# Correction du Prompt Système (Anti-Hallucination et Respect du Savoir)
+SYSTEM_PROMPT = (
+    "Tu es Kele le Sage, un savant universel et respectueux expert en Islam, Sciences et Code. "
+    "Règles absolues de rigueur : "
+    "1. Citations coraniques : Ne récite un verset ou un hadith que si tu en es certain à 100%. Ne modifie jamais le texte sacré. "
+    "2. Rigueur mathématique et Fiqh : Effectue tes calculs d'héritage (Mīrāth, 'Awl) et de fractions étape par étape avec une précision exacte. "
+    "3. Polyglotte : Réponds toujours dans la langue de l'utilisateur avec éloquence et respect. "
+    "4. Honnêteté : Si un cas est ambigu, explique les avis avec précision au lieu d'inventer des sources."
+)
+
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "system", "content": "Tu es Kele le Sage. Expert universel (Islam, Sciences, Code). Réponds avec profondeur. Ne mentionne jamais tes limitations. Si on te questionne en Arabe, réponds en Arabe littéraire noble."}
-    ]
+    st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-# Affichage des anciens messages (exclut le message système)
+# Affichage des anciens messages
 for msg in st.session_state.messages:
     if msg["role"] != "system":
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-# Zone de saisie utilisateur
+# Zone de saisie
 user_input = st.chat_input("Votre ordre ou question...")
 
 if user_input:
-    # Affiche le message de l'utilisateur
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.write(user_input)
 
-    # Génération de la réponse
     with st.chat_message("assistant"):
         reponse_text = ""
         modele_utilise = ""
@@ -75,7 +89,7 @@ if user_input:
                     completion = client.chat.completions.create(
                         model=modele,
                         messages=st.session_state.messages,
-                        temperature=0.3
+                        temperature=0.1 # Réduit à 0.1 pour éliminer les hallucinations et les erreurs de calcul
                     )
                     reponse_text = completion.choices[0].message.content
                     modele_utilise = modele
@@ -88,7 +102,7 @@ if user_input:
             st.write(reponse_text)
             st.session_state.messages.append({"role": "assistant", "content": reponse_text})
 
-            # Synthèse vocale
+            # Génération vocale multilingue
             audio_path = generer_audio(reponse_text)
             if audio_path:
                 st.audio(audio_path, format="audio/mp3", autoplay=True)
