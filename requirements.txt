@@ -1,5 +1,2 @@
 streamlit
 groq
-PyPDF2
-gTTS
-Pillow
