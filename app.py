@@ -1,65 +1,96 @@
+import os
+import re
 import streamlit as st
 from groq import Groq
-import PyPDF2
 from gtts import gTTS
-import base64
 
-# CONFIGURATION PERMANENTE
-API_KEY = "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"
-client = Groq(api_key=API_KEY)
+# Configuration de la page Streamlit
+st.set_page_config(page_title="Kele le Sage", page_icon="✨", layout="centered")
 
-st.set_page_config(page_title="KELE-GÉANT", page_icon="🦁")
+# Clé API et initialisation du client
+os.environ["GROQ_API_KEY"] = "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"
+client = Groq()
 
-# PERSONNALITÉ DU GÉANT
-SYSTEM_PROMPT = """
-Tu es KELE-GÉANT, l'IA suprême du monde de Kele.
-- Tu es un Maître en Sciences Islamiques, Coran, Langues, Codage et toutes Sciences.
-- Tu testes les élèves, tu corriges les récitations du Coran mot par mot.
-- Tu peux analyser des fichiers PDF et Audio.
-- Ton raisonnement est supérieur, logique et profond.
-- Si on te demande de modifier une réponse, fais-le immédiatement.
-"""
+MON_ARSENAL = [
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.6-27b",
+    "groq/compound",
+    "allam-2-7b",
+    "openai/gpt-oss-20b",
+    "groq/compound-mini"
+]
 
+def purifier_texte_pour_voix(texte):
+    texte = re.sub(r'\d{2}:\d{2}', '', texte)
+    texte = re.sub(r'[\*\#\_\>\-\`]', '', texte)
+    return re.sub(r'\s+', ' ', texte).strip()
+
+def generer_audio(texte):
+    texte_propre = purifier_texte_pour_voix(texte[:600])
+    est_arabe = any('\u0600' <= c <= '\u06FF' for c in texte_propre)
+    langue = 'ar' if est_arabe else 'fr'
+    
+    try:
+        tts = gTTS(text=texte_propre, lang=langue)
+        audio_file = "sage_pur.mp3"
+        tts.save(audio_file)
+        return audio_file
+    except Exception as e:
+        st.error(f"Erreur audio : {e}")
+        return None
+
+# Interface Streamlit
+st.title("✨ Kele le Sage")
+st.write(" Posez votre question, l'IA vous répondra par texte et par la voix.")
+
+# Historique de chat dans la session
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = [
+        {"role": "system", "content": "Tu es Kele le Sage. Expert universel (Islam, Sciences, Code). Réponds avec profondeur. Ne mentionne jamais tes limitations. Si on te questionne en Arabe, réponds en Arabe littéraire noble."}
+    ]
 
-# INTERFACE
-st.title("🦁 KELE-GÉANT")
-st.sidebar.title("Menu du Maître")
-mode = st.sidebar.selectbox("Action", ["Enseignement Général", "Correction Coran", "Expert Codage"])
-file = st.sidebar.file_uploader("Envoyer Audio/PDF/Image", type=["pdf", "mp3", "wav", "png", "jpg"])
+# Affichage des anciens messages (exclut le message système)
+for msg in st.session_state.messages:
+    if msg["role"] != "system":
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
 
-# FONCTION AUDIO
-def play_audio(text):
-    tts = gTTS(text=text[:300], lang='fr')
-    tts.save("response.mp3")
-    with open("response.mp3", "rb") as f:
-        data = f.read()
-    b64 = base64.b64encode(data).decode()
-    st.markdown(f'<audio src="data:audio/mp3;base64,{b64}" controls autoplay></audio>', unsafe_url_allowed=True)
+# Zone de saisie utilisateur
+user_input = st.chat_input("Votre ordre ou question...")
 
-# LOGIQUE DE CHAT
-for i, msg in enumerate(st.session_state.messages):
-    with st.chat_message(msg["role"]):
-        st.write(msg["content"])
-        if msg["role"] == "assistant":
-            if st.button(f"Copier la réponse {i}"):
-                st.write("✅ Texte prêt à être copié")
-
-if prompt := st.chat_input("Parlez à KELE-GÉANT..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+if user_input:
+    # Affiche le message de l'utilisateur
+    st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
-        st.write(prompt)
+        st.write(user_input)
 
+    # Génération de la réponse
     with st.chat_message("assistant"):
-        res = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + st.session_state.messages
-        ).choices[0].message.content
-        st.write(res)
-        play_audio(res) # Le Géant parle !
-        st.session_state.messages.append({"role": "assistant", "content": res})
+        reponse_text = ""
+        modele_utilise = ""
+        
+        with st.spinner("Consultation de la sagesse..."):
+            for modele in MON_ARSENAL:
+                try:
+                    completion = client.chat.completions.create(
+                        model=modele,
+                        messages=st.session_state.messages,
+                        temperature=0.3
+                    )
+                    reponse_text = completion.choices[0].message.content
+                    modele_utilise = modele
+                    break
+                except Exception:
+                    continue
 
-if st.sidebar.button("Nouveau Chat"):
-    st.session_state.messages = []
-    st.rerun()
+        if reponse_text:
+            st.markdown(f"**[Source : {modele_utilise}]**")
+            st.write(reponse_text)
+            st.session_state.messages.append({"role": "assistant", "content": reponse_text})
+
+            # Synthèse vocale
+            audio_path = generer_audio(reponse_text)
+            if audio_path:
+                st.audio(audio_path, format="audio/mp3", autoplay=True)
+        else:
+            st.error("⚠️ Le Savoir est temporairement inaccessible.")
